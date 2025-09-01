@@ -1,0 +1,72 @@
+name: Simple CI/CD to GitHub Pages
+
+# Run this pipeline on every push to the "main" branch
+on:
+  push:
+    branches: [ "main" ]
+
+# These permissions are needed to deploy to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  # STAGE 1: BUILD & TEST
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: (Test) Check for broken links (This will FAIL because of our broken link)
+      - name: Check links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: 'yes'
+          folder-path: './'
+
+      # Step 3: (Build) This isn't needed for HTML, but we'll "package" the files
+      - name: Setup Pages
+        uses: actions/configure-pages@v3
+
+      # Step 4: Upload the build artifact (our files) for the deploy job
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v2
+        with:
+          path: '.'
+
+  # STAGE 2: DEPLOY
+  deploy:
+    needs: build-and-test # Only run if the build-and-test job succeeds
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
+
+  # STAGE 3: NOTIFICATION (ON FAILURE)
+  notify-on-failure:
+    name: Notify on Failure
+    needs: [build-and-test, deploy] # Watch previous jobs
+    # ONLY run if the workflow failed or was cancelled
+    if: ${{ failure() || cancelled() }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # Customize this message. We'll use a simple curl command to Discord.
+      - name: Send Discord Notification
+        run: |
+          curl -H "Content-Type: application/json" \
+          -X POST \
+          -d '{"content": "🚨 **Pipeline FAILED!** Check the logs: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' \
+          ${{ secrets.DISCORD_WEBHOOK_URL }}
